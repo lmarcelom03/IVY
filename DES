@@ -1,0 +1,144 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Análisis de datos económicos de PERÚ con Python (Parte 1 y Parte 2)
+
+- Descarga indicadores anuales desde la API del World Bank para PERÚ.
+- Lee los datos en un DataFrame de pandas y calcula estadísticas descriptivas.
+- Genera (al menos) 2 gráficos con matplotlib usando `subplots`.
+
+Requisitos:
+    pip install pandas numpy matplotlib requests
+
+Ejecución:
+    python analisis_peru.py
+"""
+
+import os
+from typing import Dict
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import requests
+
+
+# --- Configuración de la API del Banco Mundial (World Bank) ---
+WB_BASE = (
+    "https://api.worldbank.org/v2/country/PER/indicator/{code}"
+    "?format=json&date=1960:2024&per_page=2000"
+)
+
+# Indicadores a descargar (código WB : nombre legible)
+INDICATORS: Dict[str, str] = {
+    "NY.GDP.MKTP.KD.ZG": "PIB real (crecimiento %, a/a)",
+    "FP.CPI.TOTL.ZG": "Inflación CPI (%, a/a)",
+    "SL.UEM.TOTL.ZS": "Desempleo (% fuerza laboral)",
+    "NE.EXP.GNFS.ZS": "Exportaciones (% del PIB)",
+    "NE.IMP.GNFS.ZS": "Importaciones (% del PIB)",
+}
+
+
+def fetch_indicator(code: str, name: str) -> pd.DataFrame:
+    """
+    Descarga un indicador del World Bank para Perú y retorna DataFrame
+    con columnas ['year', name].
+    """
+    url = WB_BASE.format(code=code)
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, list) or len(data) < 2:
+        raise RuntimeError(f"Respuesta inesperada de la API del WB para {code}")
+    rows = data[1]  # La segunda posición contiene la lista de observaciones
+
+    df = pd.DataFrame(
+        [
+            {
+                "year": int(obs["date"]),
+                name: (None if obs["value"] is None else float(obs["value"])),
+            }
+            for obs in rows
+        ]
+    )
+    return df.sort_values("year").reset_index(drop=True)
+
+
+def build_dataset(indicators: Dict[str, str]) -> pd.DataFrame:
+    """Unifica todos los indicadores por año en un único DataFrame."""
+    merged = None
+    for code, name in indicators.items():
+        df_i = fetch_indicator(code, name)
+        merged = df_i if merged is None else pd.merge(merged, df_i, on="year", how="outer")
+    merged = merged.sort_values("year").reset_index(drop=True)
+    merged.set_index("year", inplace=True)
+    return merged
+
+
+def main() -> None:
+    # -------------------- PARTE 1 --------------------
+    df = build_dataset(INDICATORS)
+
+    # Carpeta de salida
+    out_dir = os.path.abspath("resultados_peru")
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Guardar datos crudos
+    csv_path = os.path.join(out_dir, "datos_peru.csv")
+    df.to_csv(csv_path, encoding="utf-8")
+
+    # Estadísticos descriptivos
+    desc = df.describe().T
+    means = df.mean(numeric_only=True).to_frame(name="mean")
+    cov = df.cov(min_periods=3, numeric_only=True)
+    corr = df.corr(min_periods=3, numeric_only=True)
+
+    # Exportar a Excel con múltiples hojas
+    excel_path = os.path.join(out_dir, "estadisticos_peru.xlsx")
+    with pd.ExcelWriter(excel_path) as xw:
+        df.to_excel(xw, sheet_name="datos")
+        desc.to_excel(xw, sheet_name="describe")
+        means.to_excel(xw, sheet_name="mean")
+        cov.to_excel(xw, sheet_name="cov")
+        corr.to_excel(xw, sheet_name="corr")
+
+    print(f"Datos guardados en: {csv_path}")
+    print(f"Estadísticos guardados en: {excel_path}")
+
+    # -------------------- PARTE 2 --------------------
+    # 2 gráficos usando subplots:
+    # (1) Series: PIB real (crecimiento) e Inflación
+    # (2) Dispersión: Inflación vs Crecimiento del PIB real
+    ts = df[["PIB real (crecimiento %, a/a)", "Inflación CPI (%, a/a)"]].dropna(how="any")
+
+    fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(12, 8), constrained_layout=True)
+
+    # Gráfico 1: líneas (series de tiempo)
+    axes[0].plot(ts.index, ts["PIB real (crecimiento %, a/a)"], label="PIB real (% a/a)")
+    axes[0].plot(ts.index, ts["Inflación CPI (%, a/a)"], label="Inflación CPI (% a/a)")
+    axes[0].set_title("Perú: PIB real (crecimiento) e Inflación (anual)")
+    axes[0].set_xlabel("Año")
+    axes[0].set_ylabel("%")
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    # Gráfico 2: dispersión
+    axes[1].scatter(ts["Inflación CPI (%, a/a)"], ts["PIB real (crecimiento %, a/a)"])
+    axes[1].set_title("Perú: Relación Inflación vs Crecimiento del PIB real")
+    axes[1].set_xlabel("Inflación CPI (%, a/a)")
+    axes[1].set_ylabel("PIB real (crecimiento %, a/a)")
+    axes[1].grid(True, alpha=0.3)
+
+    fig_path = os.path.join(out_dir, "graficos_peru.png")
+    plt.savefig(fig_path, dpi=150)
+    print(f"Gráficos guardados en: {fig_path}")
+
+    # Mostrar (si hay backend interactivo)
+    try:
+        plt.show()
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    main()
