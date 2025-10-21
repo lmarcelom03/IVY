@@ -15,6 +15,10 @@ Ejecución típica en línea:
 Modo sin conexión (cargando un CSV con datos históricos):
     python pregunta2.py --input datos.csv --ticker AAPL
 
+Opciones adicionales útiles:
+    --forecast-steps 10   # controla la cantidad de días a pronosticar
+    --show-plots          # muestra los gráficos además de guardarlos
+
 El archivo CSV debe tener la fecha en la primera columna y contener al menos
 una columna "Adj Close" o "Close".
 """
@@ -119,7 +123,9 @@ def acquire_data(
     return df
 
 
-def part1_analysis(df: pd.DataFrame, ticker: str, out_dir: Path) -> pd.Series:
+def part1_analysis(
+    df: pd.DataFrame, ticker: str, out_dir: Path, show_plots: bool
+) -> pd.Series:
     """Realiza las tareas de la parte 1 y retorna la serie de retornos diarios."""
     print("\n=== Parte 1: Exploración de datos ===")
     print("Primeras filas:")
@@ -147,6 +153,8 @@ def part1_analysis(df: pd.DataFrame, ticker: str, out_dir: Path) -> pd.Series:
     fig.tight_layout()
     fig_path = out_dir / f"{ticker}_precio_ma.png"
     fig.savefig(fig_path, dpi=150)
+    if show_plots:
+        plt.show()
     plt.close(fig)
     print(f"Gráfico de precio y medias móviles guardado en: {fig_path}")
 
@@ -187,6 +195,8 @@ def part1_analysis(df: pd.DataFrame, ticker: str, out_dir: Path) -> pd.Series:
     fig.tight_layout()
     hist_path = out_dir / f"{ticker}_hist_retornos.png"
     fig.savefig(hist_path, dpi=150)
+    if show_plots:
+        plt.show()
     plt.close(fig)
     print(f"Histogramas de retornos guardados en: {hist_path}")
 
@@ -259,7 +269,11 @@ def evaluate_models(models: Dict[str, ModelResult]) -> Tuple[str, ModelResult]:
 
 
 def plot_model_diagnostics(
-    best_name: str, best_result: ModelResult, price: pd.Series, out_dir: Path
+    best_name: str,
+    best_result: ModelResult,
+    price: pd.Series,
+    out_dir: Path,
+    show_plots: bool,
 ) -> None:
     """Genera gráficos diagnósticos para el mejor modelo."""
     if best_name.startswith("ARIMA"):
@@ -299,6 +313,8 @@ def plot_model_diagnostics(
     fig.tight_layout()
     diag_path = out_dir / f"{best_name.replace(' ', '_')}_diagnosticos.png"
     fig.savefig(diag_path, dpi=150)
+    if show_plots:
+        plt.show()
     plt.close(fig)
     print(f"Gráficos diagnósticos guardados en: {diag_path}")
 
@@ -309,6 +325,7 @@ def forecast_future(
     price: pd.Series,
     out_dir: Path,
     steps: int = 5,
+    show_plots: bool = False,
 ) -> pd.DataFrame:
     """Genera pronóstico y devuelve DataFrame con intervalos de confianza."""
     if best_name.startswith("ARIMA"):
@@ -368,6 +385,8 @@ def forecast_future(
     fig.tight_layout()
     forecast_fig_path = out_dir / f"{best_name.replace(' ', '_')}_pronostico_plot.png"
     fig.savefig(forecast_fig_path, dpi=150)
+    if show_plots:
+        plt.show()
     plt.close(fig)
     print(f"Gráfico de pronóstico guardado en: {forecast_fig_path}")
 
@@ -378,6 +397,13 @@ def ensure_output_dir(path: Optional[str]) -> Path:
     out_dir = Path(path) if path else Path("resultados_pregunta2")
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
+
+
+def positive_int(value: str) -> int:
+    ivalue = int(value)
+    if ivalue <= 0:
+        raise argparse.ArgumentTypeError("El número de pasos debe ser positivo.")
+    return ivalue
 
 
 def parse_args() -> argparse.Namespace:
@@ -408,6 +434,17 @@ def parse_args() -> argparse.Namespace:
         type=str,
         help="Directorio donde se guardarán los resultados (por defecto: resultados_pregunta2)",
     )
+    parser.add_argument(
+        "--forecast-steps",
+        type=positive_int,
+        default=5,
+        help="Cantidad de días a pronosticar (por defecto: 5)",
+    )
+    parser.add_argument(
+        "--show-plots",
+        action="store_true",
+        help="Mostrar las figuras en pantalla además de guardarlas.",
+    )
     return parser.parse_args()
 
 
@@ -417,15 +454,28 @@ def main() -> None:
     out_dir = ensure_output_dir(args.output)
 
     df = acquire_data(ticker, args.input, args.start, args.end)
-    part1_analysis(df, ticker, out_dir)
+    part1_analysis(df, ticker, out_dir, show_plots=args.show_plots)
 
     price = df["Adj Close"].dropna()
     train, test = split_series(price)
     models = fit_models(train, test)
     best_name, best_result = evaluate_models(models)
 
-    plot_model_diagnostics(best_name, best_result, price, out_dir)
-    forecast_future(best_name, best_result, price, out_dir, steps=5)
+    plot_model_diagnostics(
+        best_name,
+        best_result,
+        price,
+        out_dir,
+        show_plots=args.show_plots,
+    )
+    forecast_future(
+        best_name,
+        best_result,
+        price,
+        out_dir,
+        steps=args.forecast_steps,
+        show_plots=args.show_plots,
+    )
 
 
 if __name__ == "__main__":
