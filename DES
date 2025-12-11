@@ -138,6 +138,29 @@ def tomar_muestra(df: pd.DataFrame, n: int, random_state: int) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def eliminar_columnas_todo_na(
+    df: pd.DataFrame, excepciones: Optional[List[str]] = None
+) -> pd.DataFrame:
+    """Elimina columnas que contienen exclusivamente valores faltantes.
+
+    Esto evita advertencias de ``SimpleImputer`` por columnas sin datos y mantiene
+    la consistencia entre el número de columnas transformadas y las importancias
+    calculadas por el Random Forest.
+    """
+
+    excepciones = excepciones or []
+    cols_descartar = [
+        col for col in df.columns if col not in excepciones and df[col].isna().all()
+    ]
+    if cols_descartar:
+        print(
+            "Columnas eliminadas por tener solo NA (se ignoran en el modelado):",
+            cols_descartar,
+        )
+        return df.drop(columns=cols_descartar)
+    return df
+
+
 def preparar_target(df: pd.DataFrame, nombre_target: str) -> pd.DataFrame:
     """Limpia la variable objetivo informal_p y muestra su distribución."""
     if nombre_target not in df.columns:
@@ -344,19 +367,18 @@ def extraer_importancias(rf_pipeline: Pipeline, output_dir: str, top_n: int = 20
     rf_model: RandomForestClassifier = rf_pipeline.named_steps["model"]
     preprocessor: ColumnTransformer = rf_pipeline.named_steps["preprocess"]
 
-    # Nombres de variables después del One-Hot Encoding
-    cat_cols = preprocessor.transformers_[1][2]
-    ohe: OneHotEncoder = preprocessor.named_transformers_["cat"].named_steps["onehot"]
-    cat_feature_names = ohe.get_feature_names_out(cat_cols)
-
-    num_feature_names = preprocessor.transformers_[0][2]
-    all_feature_names = np.concatenate([num_feature_names, cat_feature_names])
+    # Nombres de variables después del preprocesamiento (respetan columnas descartadas)
+    feature_names = preprocessor.get_feature_names_out()
 
     importances = rf_model.feature_importances_
-    if len(importances) != len(all_feature_names):
-        raise ValueError("La dimensión de importancias no coincide con el número de features.")
+    if len(importances) != len(feature_names):
+        raise ValueError(
+            "La dimensión de importancias no coincide con el número de features "
+            f"({len(importances)} vs {len(feature_names)}). Verifica columnas vacías o "
+            "categorías sin datos."
+        )
 
-    df_imp = pd.DataFrame({"variable": all_feature_names, "importancia": importances})
+    df_imp = pd.DataFrame({"variable": feature_names, "importancia": importances})
     df_imp = df_imp.sort_values("importancia", ascending=False).reset_index(drop=True)
 
     top_imp = df_imp.head(top_n)
@@ -385,6 +407,9 @@ def main(ruta_archivo: Optional[str] = None) -> None:
 
     # 2. Tomar muestra
     df = tomar_muestra(df, SAMPLE_SIZE, random_state=RANDOM_STATE)
+
+    # 2b. Quitar columnas sin información para evitar advertencias y desajustes
+    df = eliminar_columnas_todo_na(df, excepciones=["informal_p"])
 
     # 3. Preparar variable objetivo
     df = preparar_target(df, nombre_target="informal_p")
