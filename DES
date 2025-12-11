@@ -11,11 +11,16 @@ Script completo que:
     - Genera matrices de confusión, curva ROC y (opcional) importancias de variables.
 
 Requisitos:
-    pip install pandas numpy scikit-learn matplotlib seaborn openpyxl
+    # En Google Colab (recomendado ejecutar en una celda previa):
+    %pip install -q pandas numpy scikit-learn matplotlib seaborn openpyxl
+    # Si usas Google Drive, monta antes de ejecutar el script:
+    from google.colab import drive
+    drive.mount("/content/drive")
 """
 
 import os
-from typing import List, Tuple
+import sys
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -45,16 +50,74 @@ RANDOM_STATE = 123
 DATA_FILE = "EPEN BD Ciudades Anual 2023.xlsx"
 SAMPLE_SIZE = 30000
 OUTPUT_DIR = "resultados_modelo"
+# Carpeta base por defecto (en Colab suele ser /content)
+DEFAULT_DATA_DIR = "/content" if "google.colab" in sys.modules else "."
 
 
 # ---------------------------
 # Funciones auxiliares
 # ---------------------------
+def resolver_ruta_datos(nombre_archivo: str, ruta_manual: Optional[str] = None) -> str:
+    """Devuelve una ruta válida para el archivo de datos, considerando Colab.
+
+    - Usa la ruta proporcionada en ``ruta_manual`` si existe.
+    - Busca en la carpeta por defecto (``DEFAULT_DATA_DIR``) y en Google Drive
+      (``/content/drive/MyDrive``) cuando se ejecuta en Colab.
+    - Si no encuentra el archivo en Colab, intenta solicitarlo mediante ``files.upload``.
+    """
+
+    # 1) Ruta manual proporcionada por el usuario
+    if ruta_manual:
+        if os.path.exists(ruta_manual):
+            return ruta_manual
+        print(f"No se encontró el archivo en la ruta manual: {ruta_manual}")
+
+    # 2) Ruta local por defecto
+    default_path = os.path.join(DEFAULT_DATA_DIR, nombre_archivo)
+    if os.path.exists(default_path):
+        return default_path
+
+    # 3) Buscar en Google Drive si está montado
+    drive_path = os.path.join("/content/drive/MyDrive", nombre_archivo)
+    if "google.colab" in sys.modules and os.path.exists(drive_path):
+        print("Usando archivo encontrado en Google Drive (/content/drive/MyDrive).")
+        return drive_path
+
+    # 4) Intentar carga interactiva en Colab
+    if "google.colab" in sys.modules:
+        try:
+            from google.colab import files  # type: ignore
+
+            print(
+                "No se encontró el archivo. Selecciona el Excel en el cuadro de carga "
+                "para subirlo (se guardará temporalmente en /content)."
+            )
+            upload = files.upload()
+            if nombre_archivo in upload:
+                return os.path.join("/content", nombre_archivo)
+            if upload:
+                # Si el nombre difiere, usar el primero cargado
+                first_uploaded = next(iter(upload.keys()))
+                print(
+                    f"Aviso: se usará el archivo cargado '{first_uploaded}' "
+                    "en lugar del nombre esperado."
+                )
+                return os.path.join("/content", first_uploaded)
+        except Exception as exc:  # pragma: no cover - flujo interactivo
+            print(
+                "No se pudo abrir el cuadro de carga de Colab. "
+                "Sube el archivo manualmente a /content y vuelve a ejecutar."
+            )
+            print(f"Detalle: {exc}")
+
+    raise FileNotFoundError(
+        "No se encontró el archivo EPEN. Verifica la ruta, monta Google Drive o "
+        "súbelo mediante files.upload en Colab."
+    )
+
+
 def cargar_datos(ruta_archivo: str) -> pd.DataFrame:
     """Carga la base EPEN desde Excel (primera hoja) y muestra información básica."""
-    if not os.path.exists(ruta_archivo):
-        raise FileNotFoundError(f"No se encontró el archivo: {ruta_archivo}")
-
     df = pd.read_excel(ruta_archivo, sheet_name=0, engine="openpyxl")
     print(f"Datos cargados desde {ruta_archivo}")
     print("Dimensión de la base:", df.shape)
@@ -254,9 +317,10 @@ def extraer_importancias(rf_pipeline: Pipeline, output_dir: str, top_n: int = 20
 # ---------------------------
 # Programa principal
 # ---------------------------
-def main() -> None:
+def main(ruta_archivo: Optional[str] = None) -> None:
     # 1. Cargar datos
-    df = cargar_datos(DATA_FILE)
+    ruta_datos = resolver_ruta_datos(DATA_FILE, ruta_manual=ruta_archivo)
+    df = cargar_datos(ruta_datos)
 
     # 2. Tomar muestra
     df = tomar_muestra(df, SAMPLE_SIZE, random_state=RANDOM_STATE)
