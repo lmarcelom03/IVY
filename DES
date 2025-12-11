@@ -346,18 +346,29 @@ def plot_confusion_matrix(y_true, y_pred, nombre_modelo: str, output_dir: str) -
 
 def plot_curva_roc(y_true, y_prob_lr, y_prob_rf, output_dir: str) -> str:
     """Dibuja y guarda la curva ROC comparando ambos modelos."""
-    plt.figure(figsize=(6, 6))
+    fig, ax = plt.subplots(figsize=(6, 6))
 
-    RocCurveDisplay.from_predictions(y_true, y_prob_lr, name="Regresión Logística")
-    RocCurveDisplay.from_predictions(y_true, y_prob_rf, name="Random Forest")
-    plt.plot([0, 1], [0, 1], "k--")
-    plt.title("Curva ROC - Comparación de modelos")
-    plt.tight_layout()
+    RocCurveDisplay.from_predictions(
+        y_true,
+        y_prob_lr,
+        name="Regresión Logística",
+        ax=ax,
+    )
+    RocCurveDisplay.from_predictions(
+        y_true,
+        y_prob_rf,
+        name="Random Forest",
+        ax=ax,
+    )
+    ax.plot([0, 1], [0, 1], "k--")
+    ax.set_title("Curva ROC - Comparación de modelos")
+    ax.legend(loc="lower right")
+    fig.tight_layout()
 
     os.makedirs(output_dir, exist_ok=True)
     file_path = os.path.join(output_dir, "curva_ROC_comparacion.png")
-    plt.savefig(file_path, dpi=200)
-    plt.close()
+    fig.savefig(file_path, dpi=200)
+    plt.close(fig)
     print(f"Curva ROC guardada en: {file_path}")
     return file_path
 
