@@ -20,6 +20,7 @@ Requisitos:
 
 import os
 import sys
+import unicodedata
 from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -146,16 +147,39 @@ def preparar_target(df: pd.DataFrame, nombre_target: str) -> pd.DataFrame:
     df = df[df[nombre_target].notna()].copy()
     print("Filas después de eliminar NA en el target:", len(df))
 
+    def _normalizar_texto(valor: str) -> str:
+        """Convierte a minúsculas sin tildes para comparar etiquetas textuales."""
+
+        texto = str(valor).strip().lower()
+        texto = unicodedata.normalize("NFKD", texto)
+        texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
+        return texto
+
     def normalizar_informal(valor):
         """Mapea etiquetas textuales o numéricas a 0/1 y devuelve NaN si no se reconoce."""
 
         if pd.isna(valor):
             return np.nan
 
-        # Convertir a texto para manejar valores como "Empleo Informal" o "1"
-        v = str(valor).strip().lower()
+        # Manejo directo para valores numéricos o booleanos
+        if isinstance(valor, (int, np.integer, float, np.floating)):
+            if pd.isna(valor):
+                return np.nan
+            if valor == 1:
+                return 1
+            if valor == 0:
+                return 0
 
-        positivos = {"1", "1.0", "si", "sí", "informal", "empleo informal"}
+        v = _normalizar_texto(valor)
+
+        positivos = {
+            "1",
+            "1.0",
+            "si",
+            "sí",
+            "informal",
+            "empleo informal",
+        }
         negativos = {"0", "0.0", "no", "formal", "empleo formal"}
 
         if v in positivos:
@@ -164,14 +188,21 @@ def preparar_target(df: pd.DataFrame, nombre_target: str) -> pd.DataFrame:
             return 0
         return np.nan
 
+    columna_original = df[nombre_target].copy()
     df[nombre_target] = df[nombre_target].apply(normalizar_informal)
 
     filas_validas = df[df[nombre_target].notna()].copy()
     filas_descartadas = len(df) - len(filas_validas)
     if filas_descartadas > 0:
+        valores_no_reconocidos = (
+            columna_original[df[nombre_target].isna()]  # type: ignore[arg-type]
+            .astype(str)
+            .value_counts()
+            .head(10)
+        )
         print(
             f"Advertencia: se descartaron {filas_descartadas} filas por valores de "
-            f"target no reconocidos."
+            f"target no reconocidos. Principales valores ignorados:\n{valores_no_reconocidos}"
         )
 
     df = filas_validas
