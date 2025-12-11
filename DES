@@ -15,9 +15,8 @@ Ejecución:
 """
 
 import os
-from typing import Dict
+from typing import Dict, Tuple
 
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import requests
@@ -43,14 +42,22 @@ def fetch_indicator(code: str, name: str) -> pd.DataFrame:
     """
     Descarga un indicador del World Bank para Perú y retorna DataFrame
     con columnas ['year', name].
+    Lanza RuntimeError si la respuesta no tiene el formato esperado.
     """
     url = WB_BASE.format(code=code)
-    r = requests.get(url, timeout=30)
-    r.raise_for_status()
+    try:
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
+    except requests.RequestException as exc:  # type: ignore[assignment]
+        raise RuntimeError(f"Error al consultar el indicador {code}: {exc}") from exc
+
     data = r.json()
     if not isinstance(data, list) or len(data) < 2:
         raise RuntimeError(f"Respuesta inesperada de la API del WB para {code}")
+
     rows = data[1]  # La segunda posición contiene la lista de observaciones
+    if not isinstance(rows, list):
+        raise RuntimeError(f"La estructura de filas es inválida para {code}")
 
     df = pd.DataFrame(
         [
@@ -59,6 +66,7 @@ def fetch_indicator(code: str, name: str) -> pd.DataFrame:
                 name: (None if obs["value"] is None else float(obs["value"])),
             }
             for obs in rows
+            if obs.get("date")
         ]
     )
     return df.sort_values("year").reset_index(drop=True)
@@ -66,34 +74,35 @@ def fetch_indicator(code: str, name: str) -> pd.DataFrame:
 
 def build_dataset(indicators: Dict[str, str]) -> pd.DataFrame:
     """Unifica todos los indicadores por año en un único DataFrame."""
-    merged = None
+    merged: pd.DataFrame | None = None
     for code, name in indicators.items():
         df_i = fetch_indicator(code, name)
         merged = df_i if merged is None else pd.merge(merged, df_i, on="year", how="outer")
+
+    if merged is None or merged.empty:
+        raise RuntimeError("No se descargó información para ninguno de los indicadores")
+
     merged = merged.sort_values("year").reset_index(drop=True)
     merged.set_index("year", inplace=True)
     return merged
 
 
-def main() -> None:
-    # -------------------- PARTE 1 --------------------
-    df = build_dataset(INDICATORS)
-
-    # Carpeta de salida
-    out_dir = os.path.abspath("resultados_peru")
+def export_statistics(df: pd.DataFrame, out_dir: str) -> Tuple[str, str]:
+    """
+    Guarda la base consolidada en CSV y un archivo Excel con
+    estadísticas descriptivas básicas.
+    Devuelve las rutas de ambos archivos para trazabilidad.
+    """
     os.makedirs(out_dir, exist_ok=True)
 
-    # Guardar datos crudos
     csv_path = os.path.join(out_dir, "datos_peru.csv")
     df.to_csv(csv_path, encoding="utf-8")
 
-    # Estadísticos descriptivos
     desc = df.describe().T
     means = df.mean(numeric_only=True).to_frame(name="mean")
     cov = df.cov(min_periods=3, numeric_only=True)
     corr = df.corr(min_periods=3, numeric_only=True)
 
-    # Exportar a Excel con múltiples hojas
     excel_path = os.path.join(out_dir, "estadisticos_peru.xlsx")
     with pd.ExcelWriter(excel_path) as xw:
         df.to_excel(xw, sheet_name="datos")
@@ -102,14 +111,13 @@ def main() -> None:
         cov.to_excel(xw, sheet_name="cov")
         corr.to_excel(xw, sheet_name="corr")
 
-    print(f"Datos guardados en: {csv_path}")
-    print(f"Estadísticos guardados en: {excel_path}")
+    return csv_path, excel_path
 
-    # -------------------- PARTE 2 --------------------
-    # 2 gráficos usando subplots:
-    # (1) Series: PIB real (crecimiento) e Inflación
-    # (2) Dispersión: Inflación vs Crecimiento del PIB real
-    ts = df[["PIB real (crecimiento %, a/a)", "Inflación CPI (%, a/a)"]].dropna(how="any")
+
+def plot_indicators(ts: pd.DataFrame, out_dir: str) -> str:
+    """Genera y guarda los dos gráficos solicitados, devolviendo la ruta del PNG."""
+    if ts.empty:
+        raise ValueError("No hay datos suficientes para graficar las series seleccionadas")
 
     fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(12, 8), constrained_layout=True)
 
@@ -129,15 +137,33 @@ def main() -> None:
     axes[1].set_ylabel("PIB real (crecimiento %, a/a)")
     axes[1].grid(True, alpha=0.3)
 
+    os.makedirs(out_dir, exist_ok=True)
     fig_path = os.path.join(out_dir, "graficos_peru.png")
     plt.savefig(fig_path, dpi=150)
-    print(f"Gráficos guardados en: {fig_path}")
+    plt.close(fig)
 
-    # Mostrar (si hay backend interactivo)
-    try:
-        plt.show()
-    except Exception:
-        pass
+    return fig_path
+
+
+def main() -> None:
+    # -------------------- PARTE 1 --------------------
+    df = build_dataset(INDICATORS)
+
+    # Carpeta de salida
+    out_dir = os.path.abspath("resultados_peru")
+    csv_path, excel_path = export_statistics(df, out_dir)
+
+    print(f"Datos guardados en: {csv_path}")
+    print(f"Estadísticos guardados en: {excel_path}")
+
+    # -------------------- PARTE 2 --------------------
+    # 2 gráficos usando subplots:
+    # (1) Series: PIB real (crecimiento) e Inflación
+    # (2) Dispersión: Inflación vs Crecimiento del PIB real
+    ts = df[["PIB real (crecimiento %, a/a)", "Inflación CPI (%, a/a)"]].dropna(how="any")
+
+    fig_path = plot_indicators(ts, out_dir)
+    print(f"Gráficos guardados en: {fig_path}")
 
 
 if __name__ == "__main__":
