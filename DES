@@ -146,7 +146,37 @@ def preparar_target(df: pd.DataFrame, nombre_target: str) -> pd.DataFrame:
     df = df[df[nombre_target].notna()].copy()
     print("Filas después de eliminar NA en el target:", len(df))
 
+    def normalizar_informal(valor):
+        """Mapea etiquetas textuales o numéricas a 0/1 y devuelve NaN si no se reconoce."""
+
+        if pd.isna(valor):
+            return np.nan
+
+        # Convertir a texto para manejar valores como "Empleo Informal" o "1"
+        v = str(valor).strip().lower()
+
+        positivos = {"1", "1.0", "si", "sí", "informal", "empleo informal"}
+        negativos = {"0", "0.0", "no", "formal", "empleo formal"}
+
+        if v in positivos:
+            return 1
+        if v in negativos:
+            return 0
+        return np.nan
+
+    df[nombre_target] = df[nombre_target].apply(normalizar_informal)
+
+    filas_validas = df[df[nombre_target].notna()].copy()
+    filas_descartadas = len(df) - len(filas_validas)
+    if filas_descartadas > 0:
+        print(
+            f"Advertencia: se descartaron {filas_descartadas} filas por valores de "
+            f"target no reconocidos."
+        )
+
+    df = filas_validas
     df[nombre_target] = df[nombre_target].astype(int)
+
     print("Distribución de la variable objetivo (proporción):")
     print(df[nombre_target].value_counts(normalize=True).rename("proporcion"))
     print()
