@@ -37,6 +37,20 @@ function getSS_() {
   return SpreadsheetApp.openById(SPREADSHEET_ID);
 }
 
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("🔄 Actualización")
+    .addItem("Actualizar toda la información", "actualizarTodaLaInformacion")
+    .addToUi();
+}
+
+function actualizarTodaLaInformacion() {
+  const ss = getSS_();
+  setupCostCenters();
+  ss.toast("Actualización completa", "Sistema CC", 5);
+}
+
 /****************************************************
  * 1) CREAR HOJAS POR CENTRO DE COSTO (SIN ESCRIBIR EN CELDAS)
  ****************************************************/
