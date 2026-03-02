@@ -38,17 +38,25 @@ function getSS_() {
 }
 
 
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu("🔄 Actualización")
-    .addItem("Actualizar toda la información", "actualizarTodaLaInformacion")
-    .addToUi();
-}
+const UPDATE_BUTTON_CELL = "AK2";
+const UPDATE_BUTTON_LABEL_CELL = "AJ2";
 
 function actualizarTodaLaInformacion() {
-  const ss = getSS_();
   setupCostCenters();
-  ss.toast("Actualización completa", "Sistema CC", 5);
+}
+
+function ensureUpdateButton_() {
+  const ss = getSS_();
+  const cons = ss.getSheetByName(CONFIG.CONSOLIDADO_SHEET);
+  if (!cons) return;
+
+  const labelCell = cons.getRange(UPDATE_BUTTON_LABEL_CELL);
+  const buttonCell = cons.getRange(UPDATE_BUTTON_CELL);
+
+  labelCell.setValue("🔄 Actualizar toda la información");
+  buttonCell.insertCheckboxes();
+  buttonCell.setValue(false);
+  buttonCell.setNote("Marca esta casilla para actualizar todo el consolidado.");
 }
 
 /****************************************************
@@ -69,6 +77,7 @@ function setupCostCenters() {
   });
 
   rebuildConsolidado();
+  ensureUpdateButton_();
 }
 
 /****************************************************
@@ -149,6 +158,12 @@ function processEdit_(e) {
   const isCC = COST_CENTERS.includes(name);
   const isCons = (name === CONFIG.CONSOLIDADO_SHEET);
   if (!isCC && !isCons) return;
+
+  if (isCons && e.range.getA1Notation() === UPDATE_BUTTON_CELL && e.value === "TRUE") {
+    actualizarTodaLaInformacion();
+    e.range.setValue(false);
+    return;
+  }
 
   const col = e.range.getColumn();
 
